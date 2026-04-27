@@ -44,6 +44,8 @@ RUN pnpm --filter backend deploy --prod --legacy /runtime/
 
 FROM node:24.13.0-alpine3.23 AS runtime
 
+RUN apk add --no-cache curl
+
 WORKDIR /app
 
 COPY --from=build /runtime/ ./
