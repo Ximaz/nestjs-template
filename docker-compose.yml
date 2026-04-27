@@ -1,0 +1,19 @@
+services:
+  backend:
+    image: react-learning-backend
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.backend
+      platforms:
+        - linux/arm64
+        # - linux/amd64
+    container_name: react-learning-backend
+    ports:
+      - "8080:3000"
+    env_file:
+      - secrets/backend/.env
+    networks:
+      - react-learning-network
+
+networks:
+  react-learning-network:
