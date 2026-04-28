@@ -1,5 +1,25 @@
 services:
+
+  database:
+    image: postgres:16.8-alpine3.20
+    container_name: react-learning-database
+    shm_size: 128mb
+    restart: unless-stopped
+    env_file:
+      - secrets/database/.env
+    volumes:
+      - react-learning-database:/var/lib/postgresql/data:rw
+    networks:
+      - react-learning-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
+    depends_on:
+      - database
     image: react-learning-backend
     build:
       context: .
@@ -17,3 +37,6 @@ services:
 
 networks:
   react-learning-network:
+
+volumes:
+  react-learning-database:
