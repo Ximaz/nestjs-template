@@ -20,6 +20,9 @@ COPY ./pnpm-lock.yaml \
 COPY ./packages/backend/package.json \
     ./packages/backend/
 
+COPY ./packages/shared/package.json \
+    ./packages/shared/
+
 RUN pnpm install --frozen-lockfile
 
 FROM base AS build
@@ -30,17 +33,24 @@ COPY ./pnpm-workspace.yaml \
     ./package.json \
     ./
 
+COPY ./packages/shared/ \
+    ./packages/shared/
+
 COPY ./packages/backend/ \
     ./packages/backend/
 
 COPY --from=dependencies /app/node_modules \
     ./node_modules
+COPY --from=dependencies /app/packages/shared/node_modules \
+    ./packages/shared/node_modules
 COPY --from=dependencies /app/packages/backend/node_modules \
-./packages/backend/node_modules
+    ./packages/backend/node_modules
 
-RUN pnpm --filter backend build
+RUN pnpm --filter @react-learning/shared build
 
-RUN pnpm --filter backend deploy --prod --legacy /runtime/
+RUN pnpm --filter @react-learning/backend build
+
+RUN pnpm --filter @react-learning/backend deploy --prod --legacy /runtime/
 
 FROM node:24.13.0-alpine3.23 AS runtime
 
