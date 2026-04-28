@@ -1,10 +1,19 @@
 {
   "name": "react-learning",
   "version": "1.0.0",
+  "type": "module",
   "packageManager": "pnpm@10.33.2",
   "pnpm": {
     "overrides": {
       "fastify": "^5.8.5"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@prisma/engines",
+      "@scarf/scarf",
+      "@swc/core",
+      "esbuild",
+      "prisma"
+    ]
   }
 }

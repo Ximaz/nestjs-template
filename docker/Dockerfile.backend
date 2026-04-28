@@ -48,6 +48,8 @@ COPY --from=dependencies /app/packages/backend/node_modules \
 
 RUN pnpm --filter @react-learning/shared build
 
+RUN pnpm --filter @react-learning/backend prisma:generate
+
 RUN pnpm --filter @react-learning/backend build
 
 RUN pnpm --filter @react-learning/backend deploy --prod --legacy /runtime/
