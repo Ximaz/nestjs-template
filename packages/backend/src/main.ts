@@ -1,10 +1,26 @@
+import { constants } from 'node:zlib';
 import { NestFactory } from '@nestjs/core';
+import {
+  NestFastifyApplication,
+  FastifyAdapter,
+} from '@nestjs/platform-fastify';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import { AppModule } from './app.module';
 import { cleanupOpenApiDoc, ZodValidationPipe } from 'nestjs-zod';
+import fastifyMultipart from '@fastify/multipart';
+import fastifyCompress from '@fastify/compress';
+import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter(),
+  );
+
+  await app.register(fastifyCompress, {
+    brotliOptions: { params: { [constants.BROTLI_PARAM_QUALITY]: 1 } },
+  });
+
+  await app.register(fastifyMultipart);
 
   const config = new DocumentBuilder()
     .setTitle('React Learning')
@@ -16,13 +32,15 @@ async function bootstrap() {
     cleanupOpenApiDoc(SwaggerModule.createDocument(app, config));
   SwaggerModule.setup('openapi', app, documentFactory);
 
+  await app.init();
+
   app.setGlobalPrefix('api', {
-    exclude: ['openapi', ''],
+    exclude: ['openapi', 'health'],
   });
 
   app.useGlobalPipes(new ZodValidationPipe());
 
-  await app.listen(process.env.PORT ?? 3000);
+  await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
 }
 
 bootstrap().catch(console.error);
