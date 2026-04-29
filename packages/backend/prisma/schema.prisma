@@ -11,3 +11,50 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+model User {
+  id String @id @default(cuid(2))
+  email String @unique
+
+  firstName String? @map("first_name")
+  lastName String? @map("last_name")
+  picture String?
+
+  oauthCredential OAuthCredential?
+  localCredential LocalCredential?
+
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @default(now()) @map("updated_at")
+
+  @@map("user")
+}
+
+model OAuthCredential {
+  id         Int @id @default(autoincrement())
+  provider   String
+  sub        String
+  email      String
+
+  userId     String  @unique @map("user_id")
+  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @default(now()) @map("updated_at")
+
+  @@unique([provider, sub])
+  @@map("oauth_credential")
+}
+
+model LocalCredential {
+  id              Int @id @default(autoincrement())
+  email           String @unique
+  hashedPassword  String
+
+  userId          String @unique @map("user_id")
+  user            User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @default(now()) @map("updated_at")
+
+  @@map("local_credential")
+}

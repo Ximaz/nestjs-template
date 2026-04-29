@@ -1,0 +1,38 @@
+import { FastifyRequest } from 'fastify';
+import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiNotFoundResponse,
+  ApiResponse,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
+import { AuthGuard } from '../auth/guards/jwt.guard.js';
+import { UsersService } from './users.service.js';
+import { UserResponseDto } from './dto/user.dto.js';
+
+@Controller('users')
+@ApiTags('Users')
+@UseGuards(AuthGuard)
+@ApiBearerAuth('jwt')
+@ApiUnauthorizedResponse({
+  description:
+    'The client is trying to access the route without being authenticated',
+})
+export class UsersController {
+  constructor(private readonly usersService: UsersService) {}
+
+  @Get()
+  @ApiResponse({
+    type: UserResponseDto,
+  })
+  @ApiNotFoundResponse({
+    description:
+      'The user might have been deleted between the beginning of the session and this request',
+  })
+  async me(@Req() req: FastifyRequest) {
+    const userData = req['user'] as UserResponseDto;
+
+    return await this.usersService.getMe(userData.id);
+  }
+}
