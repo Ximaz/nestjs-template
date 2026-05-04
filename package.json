@@ -11,8 +11,17 @@
       "@nestjs/core",
       "@scarf/scarf",
       "@swc/core",
-      "argon2",
-      "esbuild"
+      "esbuild",
+      "prisma"
     ]
+  },
+  "devDependencies": {
+    "husky": "^9.1.7"
+  },
+  "scripts": {
+    "prepare": "husky",
+    "test": "pnpm --filter=backend test",
+    "lint": "pnpm --filter=backend lint",
+    "format": "pnpm --filter=backend format"
   }
 }
