@@ -1,5 +1,5 @@
 {
-  "name": "@react-learning/shared",
+  "name": "@project/shared",
   "version": "1.0.0",
   "description": "Shared Zod schemas and TypeScript types",
   "exports": {

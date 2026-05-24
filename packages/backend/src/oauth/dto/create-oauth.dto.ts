@@ -1,4 +1,4 @@
 import { createZodDto } from 'nestjs-zod';
-import { CreateOAuthSchema } from '@react-learning/shared';
+import { CreateOAuthSchema } from '@project/shared';
 
 export class CreateOAuthDto extends createZodDto(CreateOAuthSchema) {}

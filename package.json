@@ -1,5 +1,5 @@
 {
-  "name": "react-learning",
+  "name": "project",
   "version": "1.0.0",
   "type": "module",
   "packageManager": "pnpm@10.33.2",
@@ -11,8 +11,8 @@
       "@nestjs/core",
       "@scarf/scarf",
       "@swc/core",
-      "esbuild",
-      "prisma"
+      "argon2",
+      "esbuild"
     ]
   },
   "devDependencies": {
@@ -20,8 +20,8 @@
   },
   "scripts": {
     "prepare": "husky",
-    "test": "pnpm --filter=backend test",
-    "lint": "pnpm --filter=backend lint",
-    "format": "pnpm --filter=backend format"
+    "test": "pnpm --filter=./packages/backend test",
+    "lint": "pnpm --filter=./packages/backend lint",
+    "format": "pnpm --filter=./packages/backend format"
   }
 }
