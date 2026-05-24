@@ -1,0 +1,101 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - main
+    paths: &backend-paths
+      - "docker/backend.Dockerfile"
+      - "secrets/backend/**"
+      - "packages/backend/**"
+  pull_request:
+    paths: *backend-paths
+
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-lint-and-format:
+    name: Check lint and format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js & pnpm
+        uses: ./.github/actions/setup
+
+      - name: Install dependencies
+        run: pnpm install --filter=./packages/backend --frozen-lockfile
+
+      - name: Generate Prisma types
+        run: pnpm --filter=./packages/backend prisma:generate
+
+      - name: Run lint
+        run: pnpm --filter=./packages/backend lint
+
+      - name: Run format check
+        run: pnpm --filter=./packages/backend format
+
+      - name: Test the build process
+        run: pnpm --filter=./packages/backend build
+
+      - name: Run the tests
+        run: pnpm --filter=./packages/backend test:cov
+
+  build-and-push:
+    name: Build and Push Images
+    runs-on: ubuntu-latest
+    needs:
+      - check-lint-and-format
+
+    environment: Backend CI
+
+    env:
+      DOCKER_REGISTRY: ghcr.io
+      DOCKER_USERNAME: ${{ github.actor }}
+      DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.1.0
+
+      - name: Log in to Docker image registry
+        uses: docker/login-action@v3.7.0
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKER_PASSWORD }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5.10.0
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/backend
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,format=short
+
+      - name: Build and push image (backend)
+        uses: docker/build-push-action@v6.19.2
+        with:
+          context: .
+          file: docker/backend.Dockerfile
+          push: true
+          platforms: linux/amd64 #,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
