@@ -5,7 +5,7 @@
   "description": "The backend application for my project journey.",
   "author": "DURAND Malo (ximaz) <durand.malo.60590@gmail.com>",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "files": [
     "dist"
   ],
