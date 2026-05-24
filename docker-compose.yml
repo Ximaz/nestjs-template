@@ -37,10 +37,30 @@ services:
       timeout: 5s
       retries: 5
 
+  queue-cache:
+    image: valkey/valkey:8.1.7-alpine3.23
+    container_name: project-queue-cache
+    restart: unless-stopped
+    env_file:
+      - secrets/queue/.env
+    command: ["sh", "-c", "valkey-server --user \"$$VALKEY_USERNAME\" on \">$$VALKEY_PASSWORD\" \"~*\" \"&*\" \"+@all\" --user default off"]
+    ports:
+      - "127.0.0.1:6380:6379"
+    volumes:
+      - project-queue-cache:/data:rw
+    networks:
+      - project-network
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli --user $${VALKEY_USERNAME} -a $${VALKEY_PASSWORD} ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     depends_on:
       - database
       - cache
+      - queue-cache
     image: project-backend
     build:
       context: .
@@ -62,3 +82,4 @@ networks:
 volumes:
   project-database:
   project-cache:
+  project-queue-cache:

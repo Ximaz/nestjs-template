@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
-import { AuthGuard } from './guards/jwt.guard.js';
+import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
+import { LocalAuthGuard } from './guards/local-auth.guard.js';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -11,7 +12,9 @@ describe('AuthController', () => {
       controllers: [AuthController],
       providers: [{ provide: AuthService, useValue: {} }],
     })
-      .overrideGuard(AuthGuard)
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(LocalAuthGuard)
       .useValue({ canActivate: () => true })
       .compile();
 

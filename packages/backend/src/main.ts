@@ -9,6 +9,7 @@ import {
 } from '@nestjs/platform-fastify';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { cleanupOpenApiDoc, ZodValidationPipe } from 'nestjs-zod';
+import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { GlobalExceptionFilter } from './filters/global-exception.filter.js';
 
@@ -16,7 +17,10 @@ async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter(),
+    { bufferLogs: true },
   );
+
+  app.useLogger(app.get(Logger));
 
   await app.register(fastifyCompress, {
     global: false,
@@ -31,7 +35,7 @@ async function bootstrap() {
 
   app.useGlobalPipes(new ZodValidationPipe());
 
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  app.useGlobalFilters(new GlobalExceptionFilter(app.get(Logger)));
 
   const config = new DocumentBuilder()
     .setTitle('Project API')
@@ -64,4 +68,7 @@ async function bootstrap() {
   await app.listen(PORT, '0.0.0.0');
 }
 
-bootstrap().catch(console.error);
+bootstrap().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
