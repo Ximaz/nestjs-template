@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from '../auth/auth.service.js';
+import { CacheService } from '../cache/cache.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OauthService } from './oauth.service.js';
 
@@ -32,6 +33,7 @@ describe('OauthService', () => {
         },
         { provide: PrismaService, useValue: {} },
         { provide: AuthService, useValue: {} },
+        { provide: CacheService, useValue: {} },
       ],
     }).compile();
 

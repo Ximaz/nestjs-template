@@ -1,6 +1,6 @@
 # nestjs-template
 
-A NestJS monorepo template managed with **pnpm workspaces**, running on **Fastify**, using **Prisma** + **PostgreSQL**, with built-in JWT auth, Google OAuth2, Swagger/OpenAPI, Docker, and a GitHub Actions CI pipeline.
+A NestJS monorepo template managed with **pnpm workspaces**, running on **Fastify**, using **Prisma** + **PostgreSQL** and **Valkey** for caching, with built-in JWT auth, Google OAuth2, Swagger/OpenAPI, Docker, and a GitHub Actions CI pipeline.
 
 ---
 
@@ -14,6 +14,8 @@ A NestJS monorepo template managed with **pnpm workspaces**, running on **Fastif
 | Fastify      | 5.8.5            | HTTP server (via `@nestjs/platform-fastify`)  |
 | Prisma       | 7.8.0            | ORM & migration tool                          |
 | PostgreSQL   | 16.8-alpine3.20  | Database                                      |
+| Valkey       | 8.1.7-alpine3.23 | In-memory cache (Redis-compatible)            |
+| iovalkey     | 0.3.3            | Valkey/Redis TypeScript client                |
 | TypeScript   | 5.9.3            | Language                                      |
 | Zod          | 4.4.3            | Schema validation (via `nestjs-zod`)          |
 | argon2       | 0.44.0           | Password hashing                              |
@@ -31,12 +33,14 @@ Node version pinning is enforced through `.nvmrc` and matches the Docker base im
 .
 ├── docker/
 │   └── backend.Dockerfile      # Multi-stage build for the backend image
-├── docker-compose.yml          # Orchestrates backend + PostgreSQL
+├── docker-compose.yml          # Orchestrates backend + PostgreSQL + Valkey
+├── docs/                       # In-depth module/feature docs (see below)
 ├── packages/
 │   ├── backend/                # NestJS application (@project/backend)
 │   │   ├── src/
 │   │   │   ├── auth/           # Local credentials (email + argon2 password)
-│   │   │   ├── oauth/          # Google OAuth2 flow
+│   │   │   ├── cache/          # Valkey client (CacheService, global module)
+│   │   │   ├── oauth/          # Google OAuth2 flow (with state CSRF in cache)
 │   │   │   ├── users/          # User resource
 │   │   │   ├── health/         # /health endpoint
 │   │   │   ├── prisma/         # PrismaModule & PrismaService
@@ -49,6 +53,7 @@ Node version pinning is enforced through `.nvmrc` and matches the Docker base im
 │       └── src/                # auth, user, oauth, health schemas
 ├── secrets/
 │   ├── backend/                # Backend .env (gitignored, .env.example tracked)
+│   ├── cache/                  # Valkey .env (gitignored, .env.example tracked)
 │   └── database/               # PostgreSQL .env (gitignored, .env.example tracked)
 ├── .github/
 │   ├── actions/setup/          # Composite action: Node + pnpm setup
@@ -61,13 +66,27 @@ Node version pinning is enforced through `.nvmrc` and matches the Docker base im
 
 ---
 
+## Documentation
+
+Deep dives per topic live under [`docs/`](docs/):
+
+| Doc                              | Topic                                                                   |
+| -------------------------------- | ----------------------------------------------------------------------- |
+| [`docs/auth.md`](docs/auth.md)   | Local credentials (argon2) and JWT issuance                             |
+| [`docs/cache.md`](docs/cache.md) | Valkey service, ACL setup, `CacheService`, URL scheme notes             |
+| [`docs/docker.md`](docs/docker.md) | Compose topology and the backend multi-stage Dockerfile               |
+| [`docs/oauth.md`](docs/oauth.md) | Google OAuth2 flow + CSRF `state` protection backed by the cache       |
+| [`docs/prisma.md`](docs/prisma.md) | PostgreSQL service, schema, `PrismaService`, migration commands       |
+
+---
+
 ## Getting started
 
 ### 1. Prerequisites
 
 - Node.js (see `.nvmrc`) — `nvm use` will pick it up
 - pnpm 10.33.2 — `corepack enable && corepack prepare pnpm@10.33.2 --activate`
-- Docker & Docker Compose (for the database and containerized builds)
+- Docker & Docker Compose (for the database, cache, and containerized builds)
 
 ### 2. Install dependencies
 
@@ -81,10 +100,11 @@ This installs dependencies for all workspace packages (`@project/backend` and `@
 
 ### 3. Configure environment variables
 
-Two `.env` files are required, both gitignored. Copy the examples and fill them in:
+Three `.env` files are required, all gitignored. Copy the examples and fill them in:
 
 ```bash
 cp secrets/backend/.env.example  secrets/backend/.env
+cp secrets/cache/.env.example    secrets/cache/.env
 cp secrets/database/.env.example secrets/database/.env
 ```
 
@@ -94,10 +114,18 @@ cp secrets/database/.env.example secrets/database/.env
 | --------------------- | ----------------------------------------------------- |
 | `PORT`                | Port the NestJS app listens on (default `3000`)       |
 | `DATABASE_URL`        | PostgreSQL connection string                          |
+| `CACHE_URL`           | Valkey connection URL (`redis://user:pass@host:6379/0`) — see [`docs/cache.md`](docs/cache.md#scheme-redis-vs-valkey) |
 | `GOOGLE_CLIENT_ID`    | Google OAuth2 client ID                               |
 | `GOOGLE_CLIENT_SECRET`| Google OAuth2 client secret                           |
 | `JWT_SECRET`          | Secret used to sign JWTs (e.g. `openssl rand -hex 16`)|
 | `JWT_DURATION`        | JWT lifetime, [ms](https://github.com/vercel/ms)-format (e.g. `1d`) |
+
+**`secrets/cache/.env`** — consumed by the Valkey container:
+
+| Variable          | Description                          |
+| ----------------- | ------------------------------------ |
+| `VALKEY_USERNAME` | ACL username created at boot         |
+| `VALKEY_PASSWORD` | ACL user password                    |
 
 **`secrets/database/.env`** — consumed by the PostgreSQL container:
 
@@ -107,7 +135,7 @@ cp secrets/database/.env.example secrets/database/.env
 | `POSTGRES_PASSWORD` | DB superuser password |
 | `POSTGRES_DB`       | Default database name |
 
-Note: when running the backend from your host (not Docker), set `DATABASE_URL` host to `localhost` rather than `database`.
+When running the backend from your host (not Docker), set the host portion of `DATABASE_URL` and `CACHE_URL` to `localhost` rather than `database` / `cache`. The database container publishes `5432`; the cache container does **not** publish anything by default — see [`docs/cache.md`](docs/cache.md#host-localhost-vs-cache).
 
 ### 4. Build the shared package
 
@@ -117,10 +145,10 @@ The backend depends on `@project/shared` at `workspace:*`; it must be built befo
 pnpm --filter @project/shared build
 ```
 
-### 5. Spin up the database
+### 5. Spin up the data services
 
 ```bash
-docker compose up -d database
+docker compose up -d database cache
 ```
 
 ### 6. Run Prisma migrations & generate the client
@@ -185,26 +213,13 @@ pnpm format     # Runs Prettier on the backend
 
 ## Docker
 
-The single Dockerfile lives at [`docker/backend.Dockerfile`](docker/backend.Dockerfile). It is a 4-stage build:
-
-1. **`base`** — `node:24.13.0-alpine3.23`, enables pnpm via Corepack.
-2. **`dependencies`** — copies lockfile and every workspace `package.json`, then runs `pnpm install --frozen-lockfile`.
-3. **`build`** — copies the source code, builds `@project/shared`, generates the Prisma client, builds `@project/backend`, then uses `pnpm deploy` to create a pruned production tree in `/runtime/`.
-4. **`runtime`** — a fresh `node:24.13.0-alpine3.23`, copies only `/runtime/`, exposes port `3000`, and runs `node dist/src/main.js`. Includes a `HEALTHCHECK` pinging `/health`.
-
-### Build & run locally with Compose
-
-```bash
-docker compose build backend       # Build the backend image
-docker compose up                  # Run backend + database together
-```
-
-Docker Compose binds:
+Three services orchestrated by [`docker-compose.yml`](docker-compose.yml): `database` (PostgreSQL), `cache` (Valkey), and `backend` (NestJS). Compose binds:
 
 - Backend: container `3000` → host `8080`
 - Database: container `5432` → host `5432`
+- Cache: not published (network-internal only)
 
-The Compose file builds `linux/arm64` by default; uncomment the `linux/amd64` line in `docker-compose.yml` if you need a multi-arch image locally.
+The Compose file builds `linux/arm64` by default; uncomment the `linux/amd64` line in `docker-compose.yml` for multi-arch. Full Dockerfile breakdown in [`docs/docker.md`](docs/docker.md).
 
 ### Published images
 
@@ -214,7 +229,7 @@ CI publishes the backend image to GitHub Container Registry as `ghcr.io/<owner>/
 
 ## Continuous Integration
 
-`.github/workflows/backend-ci.yaml` runs on every push and pull request that touches `packages/backend/**`, `secrets/backend/**`, or the backend Dockerfile.
+[`.github/workflows/backend-ci.yaml`](.github/workflows/backend-ci.yaml) runs on every push and pull request that touches `packages/backend/**`, `secrets/backend/**`, or the backend Dockerfile.
 
 Two jobs:
 
@@ -240,13 +255,14 @@ before every commit. Setup is automatic — `pnpm install` invokes the `prepare`
 
 ## Modules at a glance
 
-| Module       | Responsibilities                                                |
-| ------------ | --------------------------------------------------------------- |
-| `health`     | Liveness endpoint (`GET /health`), excluded from `/api` prefix  |
-| `auth`       | Local email + password registration & login (argon2 + JWT)      |
-| `oauth`      | Google OAuth2 authorization-code flow, issues a JWT             |
-| `users`      | CRUD for the `User` resource                                    |
-| `prisma`     | `PrismaService` wrapping the generated Prisma client            |
+| Module       | Responsibilities                                                | Deep dive |
+| ------------ | --------------------------------------------------------------- | --------- |
+| `health`     | Liveness endpoint (`GET /health`), excluded from `/api` prefix  | —         |
+| `auth`       | Local email + password registration & login (argon2 + JWT)      | [`docs/auth.md`](docs/auth.md) |
+| `oauth`      | Google OAuth2 authorization-code flow with cache-backed state CSRF, issues a JWT | [`docs/oauth.md`](docs/oauth.md) |
+| `users`      | CRUD for the `User` resource                                    | —         |
+| `prisma`     | `PrismaService` wrapping the generated Prisma client            | [`docs/prisma.md`](docs/prisma.md) |
+| `cache`      | `CacheService` wrapping the Valkey client (`@Global()` module)  | [`docs/cache.md`](docs/cache.md) |
 
 The Prisma schema defines `User`, `LocalCredential`, and `OAuthCredential` models with one-to-one relations and cascade deletes — see [`packages/backend/prisma/schema.prisma`](packages/backend/prisma/schema.prisma).
 

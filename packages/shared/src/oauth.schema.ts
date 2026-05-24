@@ -27,6 +27,10 @@ export const CreateOAuthCallbackSchema = z.object({
     description:
       "The OAuth2.0 callback code returned by the provider upon authorization",
   }),
+  state: z.string().meta({
+    description:
+      "The OAuth2.0 CSRF token previously issued with the authorization URL, used to bind the callback to the original request",
+  }),
 });
 
 export type OAuth = z.infer<typeof OAuthSchema>;
