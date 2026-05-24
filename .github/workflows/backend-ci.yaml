@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --filter=./packages/backend --frozen-lockfile
 
+      - name: Build shared types and schemas
+        run: pnpm --filter=./packages/shared build
+
       - name: Generate Prisma types
         run: pnpm --filter=./packages/backend prisma:generate
 
