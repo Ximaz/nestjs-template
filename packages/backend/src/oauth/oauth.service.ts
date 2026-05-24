@@ -8,14 +8,19 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { CacheService } from '../cache/cache.service.js';
 import { CreateOAuthDto } from './dto/create-oauth.dto.js';
 import { OAuthResponseDto } from './dto/oauth.dto.js';
 import { CreateOAuthCallbackDto } from './dto/create-oauth-callback.dto.js';
 import { UserResponseDto } from '../users/dto/user.dto.js';
 import { AuthResponseDto } from '../auth/dto/auth.dto.js';
 import { AuthService } from '../auth/auth.service.js';
+
+const OAUTH_STATE_TTL_SECONDS = 300;
+const oauthStateKey = (state: string) => `oauth:state:${state}`;
 
 type OauthProvider = {
   oauthUrl: string;
@@ -45,6 +50,7 @@ export class OauthService {
     configService: ConfigService,
     private readonly prismaService: PrismaService,
     private readonly authService: AuthService,
+    private readonly cacheService: CacheService,
   ) {
     this.OAUTH_PROVIDERS = {
       google: {
@@ -58,7 +64,7 @@ export class OauthService {
     };
   }
 
-  getAuthorizationUrl(dto: CreateOAuthDto): OAuthResponseDto {
+  async getAuthorizationUrl(dto: CreateOAuthDto): Promise<OAuthResponseDto> {
     const { provider, redirectUri } = dto;
 
     if (!(provider in this.OAUTH_PROVIDERS)) {
@@ -69,11 +75,20 @@ export class OauthService {
 
     const { oauthUrl, clientId } = this.OAUTH_PROVIDERS[provider];
 
+    const state = crypto.randomBytes(32).toString('hex');
+    await this.cacheService.set(
+      oauthStateKey(state),
+      '1',
+      'EX',
+      OAUTH_STATE_TTL_SECONDS,
+    );
+
     const authorizationUrl = new URL(oauthUrl);
     authorizationUrl.searchParams.set('client_id', clientId);
     authorizationUrl.searchParams.set('redirect_uri', redirectUri);
     authorizationUrl.searchParams.set('response_type', 'code');
     authorizationUrl.searchParams.set('scope', 'email profile openid');
+    authorizationUrl.searchParams.set('state', state);
 
     return {
       url: authorizationUrl.toString(),
@@ -140,11 +155,18 @@ export class OauthService {
   }
 
   async callback(dto: CreateOAuthCallbackDto): Promise<AuthResponseDto> {
-    const { provider, redirectUri, code } = dto;
+    const { provider, redirectUri, code, state } = dto;
 
     if (!(provider in this.OAUTH_PROVIDERS)) {
       throw new BadRequestException(
         `OAuth2.0: ${provider} is not a supported provider`,
+      );
+    }
+
+    const consumed = await this.cacheService.del(oauthStateKey(state));
+    if (consumed === 0) {
+      throw new UnauthorizedException(
+        'OAuth2.0: invalid or expired state parameter',
       );
     }
 
