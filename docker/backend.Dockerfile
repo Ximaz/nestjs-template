@@ -46,13 +46,13 @@ COPY --from=dependencies /app/packages/shared/node_modules \
 COPY --from=dependencies /app/packages/backend/node_modules \
     ./packages/backend/node_modules
 
-RUN pnpm --filter @react-learning/shared build
+RUN pnpm --filter @project/shared build
 
-RUN pnpm --filter @react-learning/backend prisma:generate
+RUN pnpm --filter @project/backend prisma:generate
 
-RUN pnpm --filter @react-learning/backend build
+RUN pnpm --filter @project/backend build
 
-RUN pnpm --filter @react-learning/backend deploy --prod --legacy /runtime/
+RUN pnpm --filter @project/backend deploy --prod --legacy /runtime/
 
 FROM node:24.13.0-alpine3.23 AS runtime
 

@@ -4,7 +4,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { FastifyRequest } from 'fastify';
+import { type FastifyRequest } from 'fastify';
 import { AuthService } from '../auth.service.js';
 import { UserResponseDto } from '../../users/dto/user.dto.js';
 

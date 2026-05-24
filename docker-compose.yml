@@ -1,8 +1,7 @@
 services:
-
   database:
     image: postgres:16.8-alpine3.20
-    container_name: react-learning-database
+    container_name: project-database
     shm_size: 128mb
     restart: unless-stopped
     env_file:
@@ -10,11 +9,11 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - react-learning-database:/var/lib/postgresql/data:rw
+      - project-database:/var/lib/postgresql/data:rw
     networks:
-      - react-learning-network
+      - project-network
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -22,23 +21,23 @@ services:
   backend:
     depends_on:
       - database
-    image: react-learning-backend
+    image: project-backend
     build:
       context: .
-      dockerfile: ./docker/Dockerfile.backend
+      dockerfile: ./docker/backend.Dockerfile
       platforms:
         - linux/arm64
         # - linux/amd64
-    container_name: react-learning-backend
+    container_name: project-backend
     ports:
       - "8080:3000"
     env_file:
       - secrets/backend/.env
     networks:
-      - react-learning-network
+      - project-network
 
 networks:
-  react-learning-network:
+  project-network:
 
 volumes:
-  react-learning-database:
+  project-database:

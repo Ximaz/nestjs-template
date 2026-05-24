@@ -1,4 +1,4 @@
-import { FastifyRequest } from 'fastify';
+import { type FastifyRequest } from 'fastify';
 import { Controller, Get, Req, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,

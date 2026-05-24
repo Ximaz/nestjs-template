@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { OauthController } from './oauth.controller';
+import { OauthController } from './oauth.controller.js';
+import { OauthService } from './oauth.service.js';
 
 describe('OauthController', () => {
   let controller: OauthController;
@@ -7,6 +8,7 @@ describe('OauthController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [OauthController],
+      providers: [{ provide: OauthService, useValue: {} }],
     }).compile();
 
     controller = module.get<OauthController>(OauthController);
