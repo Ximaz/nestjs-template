@@ -34,8 +34,8 @@ async function bootstrap() {
   app.useGlobalFilters(new GlobalExceptionFilter());
 
   const config = new DocumentBuilder()
-    .setTitle('React Learning')
-    .setDescription('The Backend API for my React learning journey')
+    .setTitle('Project API')
+    .setDescription('The Backend API for my project')
     .setVersion('1.0')
     .addTag('Health Check', 'All the health-check-related endpoints')
     .addTag('Auth', 'All the authentication endpoints (local credentials)')
