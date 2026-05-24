@@ -27,11 +27,14 @@ jobs:
       - name: Setup Node.js & pnpm
         uses: ./.github/actions/setup
 
-      - name: Install dependencies
-        run: pnpm install --filter=./packages/backend --frozen-lockfile
+      - name: Install shared dependencies
+        run: pnpm install --filter=./packages/shared --frozen-lockfile
 
       - name: Build shared types and schemas
         run: pnpm --filter=./packages/shared build
+
+      - name: Install backend dependencies
+        run: pnpm install --filter=./packages/backend --frozen-lockfile
 
       - name: Generate Prisma types
         run: pnpm --filter=./packages/backend prisma:generate

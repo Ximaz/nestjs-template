@@ -19,11 +19,11 @@
   },
   "packageManager": "pnpm@10.33.2",
   "peerDependencies": {
-    "zod": "^4.3.6"
+    "zod": "4.3.6"
   },
   "devDependencies": {
-    "tsup": "^8.5.1",
-    "typescript": "^5.9.3",
-    "zod": "^4.3.6"
+    "tsup": "8.5.1",
+    "typescript": "5.9.3",
+    "zod": "4.3.6"
   }
 }

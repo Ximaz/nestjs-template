@@ -169,13 +169,13 @@ importers:
   packages/shared:
     devDependencies:
       tsup:
-        specifier: ^8.5.1
+        specifier: 8.5.1
         version: 8.5.1(@swc/core@1.15.40)(jiti@2.7.0)(typescript@5.9.3)
       typescript:
-        specifier: ^5.9.3
+        specifier: 5.9.3
         version: 5.9.3
       zod:
-        specifier: ^4.3.6
+        specifier: 4.3.6
         version: 4.3.6
 
 packages:
