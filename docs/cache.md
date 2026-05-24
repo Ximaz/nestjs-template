@@ -1,8 +1,15 @@
-# Cache (Valkey)
+# Cache (Valkey) & Queue-cache
 
-The `cache` service provides an in-memory key/value store for ephemeral data — OAuth state tokens, throttling counters, session-style payloads, etc.
+The template runs **two** independent Valkey instances:
 
-It uses [Valkey](https://valkey.io/), the Linux Foundation fork of Redis 7.2.x. The wire protocol and command surface stay Redis-compatible, so any Redis client and most Redis tooling work unchanged.
+| Service       | Purpose                                                                          | Backend client       | Env var      |
+| ------------- | -------------------------------------------------------------------------------- | -------------------- | ------------ |
+| `cache`       | App-level ephemeral storage: OAuth CSRF state, throttler counters, ad-hoc data   | `CacheService`       | `CACHE_URL`  |
+| `queue-cache` | Dedicated backing store for BullMQ — owned by the queue, not for general use     | `QueueCacheService`  | `QUEUE_URL`  |
+
+Both use [Valkey](https://valkey.io/), the Linux Foundation fork of Redis 7.2.x. The wire protocol and command surface stay Redis-compatible, so any Redis client and most Redis tooling work unchanged.
+
+Keeping the queue-cache separate is deliberate: BullMQ assumes ownership of its keyspace (queues, jobs, scheduler keys), and a stray `FLUSHDB` from cache maintenance would wipe the queue along with it. Two instances with two ACL users keep the blast radius bounded.
 
 ---
 
@@ -23,7 +30,7 @@ Declared in [`docker-compose.yml`](../docker-compose.yml) **before** the backend
 | Hostname (network)| `cache`                                                                     |
 | Network           | `project-network`                                                           |
 | Volume            | `project-cache` mounted at `/data` (RDB / AOF persistence)                  |
-| Exposed ports     | **None** — reachable only by other services on `project-network`            |
+| Published port    | `127.0.0.1:6379 → 6379` — loopback only, never exposed to the LAN           |
 | Restart policy    | `unless-stopped`                                                            |
 
 ### Image choice
@@ -84,28 +91,31 @@ Same cadence as the database healthcheck so `depends_on` semantics stay uniform.
 
 ### `secrets/backend/.env` — consumed by the backend
 
-| Variable    | Description                                         |
-| ----------- | --------------------------------------------------- |
-| `CACHE_URL` | Connection URL, e.g. `redis://user:pass@host:6379/0`|
+| Variable    | Description                                                                                |
+| ----------- | ------------------------------------------------------------------------------------------ |
+| `CACHE_URL` | Cache instance URL, e.g. `redis://user:pass@host:6379/0` or `valkey://user:pass@host:6379` |
+| `QUEUE_URL` | Queue-cache instance URL (same format) — see [Queue-cache (BullMQ)](#queue-cache-bullmq)   |
 
-The backend takes a **single URL**, not separate host/port/password vars. Username, password, host, port, and logical database number are all encoded in it.
+Each backend takes a **single URL** per instance, not separate host/port/password vars. Username, password, host, port, and logical database number are all encoded in it.
 
 ### Scheme: `redis://` vs `valkey://`
 
-The official Valkey TypeScript client used here ([`iovalkey`](https://www.npmjs.com/package/iovalkey)) is a fork of `ioredis` and inherits its URL parser, which only recognises `redis:` and `rediss:` (TLS). A `valkey://...` URL would make `iovalkey` interpret `/0` as a Unix socket path instead of a database number, breaking the connection.
+[`iovalkey`](https://www.npmjs.com/package/iovalkey) is a fork of `ioredis` and inherits its URL parser, which only recognises `redis:` / `rediss:` natively. A `valkey://...` URL passed straight to the client makes it interpret `/0` as a Unix socket path instead of a database number, and silently drops credentials — connections then fail with `NOAUTH Authentication required`.
 
-Until `iovalkey` adds native `valkey://` support, **use `redis://`** in `CACHE_URL`.
+The template sidesteps this with a small helper, [`parseValkeyUrl`](../packages/backend/src/config/valkey-url.ts), which parses the URL manually and produces a `{ host, port, username, password, db }` options object. Every Valkey-touching site uses it: `CacheService`, `QueueCacheService`, the BullMQ connection in [`queue.module.ts`](../packages/backend/src/queue/queue.module.ts), and the throttler storage in [`app.module.ts`](../packages/backend/src/app.module.ts).
+
+Either scheme works in `CACHE_URL` / `QUEUE_URL` — the helper accepts any URL that `new URL()` accepts.
 
 ### Host: `localhost` vs `cache`
 
-The shipped example uses `localhost`, suitable for running the backend on the host while the cache container exposes nothing publicly — except that **the cache exposes no ports**. The two reasonable setups:
+`cache` and `queue-cache` both publish on loopback (`127.0.0.1:6379` and `127.0.0.1:6380` respectively), so the host port is reachable for `pnpm start:dev`-style development. The two reasonable setups:
 
-| Backend runtime              | `CACHE_URL` host  | Notes                                                          |
-| ---------------------------- | ----------------- | -------------------------------------------------------------- |
-| Inside Docker (`backend` svc)| `cache`           | Docker DNS resolves the service name on `project-network`      |
-| On the host (`pnpm start:dev`)| `localhost` + a published port | The cache must publish `6379` first; default compose does not |
+| Backend runtime               | `CACHE_URL` host  | `QUEUE_URL` host  | Notes                                                       |
+| ----------------------------- | ----------------- | ----------------- | ----------------------------------------------------------- |
+| Inside Docker (`backend` svc) | `cache`           | `queue-cache`     | Docker DNS resolves the service name on `project-network`   |
+| On the host (`pnpm start:dev`)| `localhost:6379`  | `localhost:6380`  | Uses the loopback publication                               |
 
-If you develop on the host, either add `ports: ["6379:6379"]` to the `cache` service or run the backend in Docker too.
+The loopback bind keeps the cache invisible to anything other than the host itself — no LAN exposure, no firewall changes needed.
 
 ---
 
@@ -119,7 +129,7 @@ If you develop on the host, either add `ports: ["6379:6379"]` to the `cache` ser
 @Injectable()
 export class CacheService extends Valkey implements OnModuleDestroy {
   constructor(configService: ConfigService) {
-    super(configService.getOrThrow<string>('CACHE_URL'));
+    super(parseValkeyUrl(configService.getOrThrow<string>('CACHE_URL')));
     this.on('connect', () => this.logger.log('Connected to Valkey'));
     this.on('error', (err) => this.logger.error(err.message));
   }
@@ -130,7 +140,7 @@ export class CacheService extends Valkey implements OnModuleDestroy {
 }
 ```
 
-`iovalkey` parses the URL into its option set (`host`, `port`, `username`, `password`, `db`) automatically.
+`parseValkeyUrl` turns the URL into an explicit `{ host, port, username, password, db }` options object, sidestepping `iovalkey`'s scheme-restricted URL parser (see [Scheme: `redis://` vs `valkey://`](#scheme-redis-vs-valkey)). `OnModuleDestroy` + `app.enableShutdownHooks()` in [`main.ts`](../packages/backend/src/main.ts) ensures the connection drains on `SIGTERM`.
 
 ### Why `import { Redis as Valkey } from 'iovalkey'`
 
@@ -165,23 +175,122 @@ if (consumed === 0) {
 
 The OAuth flow uses this exact pattern. See [`docs/oauth.md`](oauth.md#csrf-state-protection) for the full integration.
 
----
+### Real usage — distributed throttler counters
 
-## Operating the service
+`@nestjs/throttler` is wired with [`@nest-lab/throttler-storage-redis`](https://www.npmjs.com/package/@nest-lab/throttler-storage-redis) pointed at `CACHE_URL`, in [`app.module.ts`](../packages/backend/src/app.module.ts):
 
-```bash
-docker compose up -d cache              # Start only the cache
-docker compose ps cache                 # Show health status
-docker compose logs -f cache            # Tail logs
-
-# REPL into the cache as the ACL user
-docker exec -it project-cache \
-  valkey-cli --user "$VALKEY_USERNAME" -a "$VALKEY_PASSWORD"
+```ts
+ThrottlerModule.forRootAsync({
+  inject: [ConfigService],
+  useFactory: (configService: ConfigService) => ({
+    throttlers: [ThrottleLimits.default],
+    storage: new ThrottlerStorageRedisService(
+      parseValkeyUrl(configService.getOrThrow<string>('CACHE_URL')),
+    ),
+  }),
+})
 ```
 
-The `project-cache` named volume persists data across container restarts. To wipe persisted state:
+This makes throttling counters survive horizontal scaling — every backend instance reads/writes the same bucket. The adapter opens its own Valkey connection rather than reusing `CacheService`: it does an `instanceof ioredis.Redis` check internally, and iovalkey (despite being a runtime-compatible fork) is a different class identity, so reuse would silently fail.
+
+Throttle limits live in [`packages/backend/src/config/throttle.config.ts`](../packages/backend/src/config/throttle.config.ts) — see [`docs/auth.md`](auth.md#rate-limiting) for the auth-specific override.
+
+---
+
+## Queue-cache (BullMQ)
+
+The second Valkey instance backs [BullMQ](https://docs.bullmq.io/) job queues. It's a separate container, separate ACL user, separate connection — same image and configuration shape as `cache`.
+
+### Service definition
+
+| Aspect            | Value                                                                       |
+| ----------------- | --------------------------------------------------------------------------- |
+| Image             | `valkey/valkey:8.1.7-alpine3.23`                                            |
+| Container name    | `project-queue-cache`                                                       |
+| Hostname (network)| `queue-cache`                                                               |
+| Published port    | `127.0.0.1:6380 → 6379` (offset from `cache` to avoid host-port collision)  |
+| Volume            | `project-queue-cache` mounted at `/data`                                    |
+| Env file          | `secrets/queue/.env`                                                        |
+
+### Backend integration
+
+Two pieces sit in [`packages/backend/src/queue/`](../packages/backend/src/queue/):
+
+- **`QueueModule`** ([`queue.module.ts`](../packages/backend/src/queue/queue.module.ts)) — `@Global()`. Wires `@nestjs/bullmq`'s `BullModule.forRootAsync` with the parsed connection options, and exposes `QueueCacheService`.
+- **`QueueCacheService`** ([`queue-cache.service.ts`](../packages/backend/src/queue/queue-cache.service.ts)) — extends `Valkey` directly, like `CacheService`. Used by the health indicator to `PING` the queue-cache without going through BullMQ.
+
+```ts
+@Injectable()
+export class QueueCacheService extends Valkey implements OnModuleDestroy {
+  constructor(configService: ConfigService) {
+    super({
+      ...parseValkeyUrl(configService.getOrThrow<string>('QUEUE_URL')),
+      maxRetriesPerRequest: null,
+    });
+  }
+  async onModuleDestroy(): Promise<void> { await this.quit(); }
+}
+```
+
+`maxRetriesPerRequest: null` is required by BullMQ for blocking commands (`BRPOPLPUSH`, etc.) — without it those commands time out after the default retry budget.
+
+### Defining queues
+
+`QueueModule` only wires the root connection. To add a queue, register it in a feature module and use `@Processor` / `@OnWorkerEvent` from `@nestjs/bullmq`:
+
+```ts
+@Module({
+  imports: [BullModule.registerQueue({ name: 'emails' })],
+  providers: [EmailsProcessor],
+})
+export class EmailsModule {}
+
+@Processor('emails')
+export class EmailsProcessor extends WorkerHost {
+  async process(job: Job) { /* ... */ }
+}
+```
+
+See the [`@nestjs/bullmq` docs](https://docs.nestjs.com/techniques/queues) for the full surface.
+
+### When *not* to share the queue-cache connection
+
+The `QueueCacheService` is exported so non-BullMQ code (e.g. the health indicator) can issue commands against the same instance. **Don't use it as a general-purpose cache** — BullMQ owns the keyspace and adding unrelated keys risks collisions with future queue features. Use `CacheService` for app-level caching.
+
+---
+
+## Health indicator
+
+`/health` runs a `PING` against each Valkey instance via a shared `ValkeyHealthIndicator` ([`packages/backend/src/health/indicators/valkey.indicator.ts`](../packages/backend/src/health/indicators/valkey.indicator.ts)). The indicator is client-agnostic — it accepts any `Valkey` instance as an argument — which is why one indicator covers both `cache` and `queue-cache`:
+
+```ts
+this.health.check([
+  () => this.valkeyIndicator.pingCheck('cache', this.cacheService),
+  () => this.valkeyIndicator.pingCheck('queue-cache', this.queueCacheService),
+]);
+```
+
+A non-`PONG` reply marks the indicator as `down` with the reply included in the response body. See [`docs/prisma.md`](prisma.md#health-indicator) for the database side.
+
+---
+
+## Operating the services
+
+```bash
+# Start the data services
+docker compose up -d cache queue-cache
+docker compose ps cache queue-cache       # Health status
+docker compose logs -f cache              # Tail logs
+
+# REPL into either instance as the ACL user
+docker exec -it project-cache       valkey-cli --user "$VALKEY_USERNAME" -a "$VALKEY_PASSWORD"
+docker exec -it project-queue-cache valkey-cli --user "$VALKEY_USERNAME" -a "$VALKEY_PASSWORD"
+```
+
+The `project-cache` and `project-queue-cache` named volumes persist data across container restarts. To wipe persisted state:
 
 ```bash
 docker compose down
 docker volume rm nestjs-template_project-cache
+docker volume rm nestjs-template_project-queue-cache
 ```

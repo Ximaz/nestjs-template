@@ -9,13 +9,22 @@ import {
 } from '@nestjs/common';
 import { OauthService } from './oauth.service.js';
 import { CreateOAuthDto } from './dto/create-oauth.dto.js';
-import { ApiBody, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiOkResponse,
+  ApiTags,
+  ApiTooManyRequestsResponse,
+} from '@nestjs/swagger';
 import { OAuthResponseDto } from './dto/oauth.dto.js';
 import { CreateOAuthCallbackDto } from './dto/create-oauth-callback.dto.js';
 import { AuthResponseDto } from '../auth/dto/auth.dto.js';
 
 @Controller('oauth')
 @ApiTags('OAuth')
+@ApiTooManyRequestsResponse({
+  description:
+    'Rate limit exceeded, too many requests in the throttling window.',
+})
 export class OauthController {
   constructor(private readonly oauthService: OauthService) {}
 

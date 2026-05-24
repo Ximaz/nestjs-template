@@ -2,6 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { Module, RequestMethod } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
+import { APP_GUARD } from '@nestjs/core';
+import { validateEnv } from './config/env.schema.js';
+import { ThrottleLimits } from './config/throttle.config.js';
+import { parseValkeyUrl } from './config/valkey-url.js';
 import { HealthModule } from './health/health.module.js';
 import { UsersModule } from './users/users.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
@@ -14,6 +20,16 @@ import { QueueModule } from './queue/queue.module.js';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateEnv,
+    }),
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        throttlers: [ThrottleLimits.default],
+        storage: new ThrottlerStorageRedisService(
+          parseValkeyUrl(configService.getOrThrow<string>('CACHE_URL')),
+        ),
+      }),
     }),
     LoggerModule.forRootAsync({
       inject: [ConfigService],
@@ -63,5 +79,6 @@ import { QueueModule } from './queue/queue.module.js';
     QueueModule,
     OauthModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

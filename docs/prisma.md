@@ -35,17 +35,21 @@ Declared in [`docker-compose.yml`](../docker-compose.yml):
 
 ```ts
 @Injectable()
-export class PrismaService extends PrismaClient {
+export class PrismaService extends PrismaClient implements OnModuleDestroy {
   constructor(configService: ConfigService) {
     const adapter = new PrismaPg({
       connectionString: configService.getOrThrow<string>('DATABASE_URL'),
     });
     super({ adapter });
   }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.$disconnect();
+  }
 }
 ```
 
-`PrismaModule` exports the service for injection by other modules (`AuthModule`, `OauthModule`, `UsersModule`).
+`PrismaModule` exports the service for injection by other modules (`AuthModule`, `OauthModule`, `UsersModule`). `OnModuleDestroy` combined with `app.enableShutdownHooks()` in [`main.ts`](../packages/backend/src/main.ts) drains the Postgres connection pool cleanly on `SIGTERM` — important for rolling deploys and to avoid leaking connections during dev hot-reloads.
 
 ### `DATABASE_URL`
 
@@ -103,3 +107,24 @@ pnpm --filter @project/backend prisma:migrate
 ```
 
 The Docker build runs `prisma:generate` in the `build` stage, so the runtime image ships with a generated client.
+
+---
+
+## Health indicator
+
+`/health` exercises the database via [`PrismaHealthIndicator`](../packages/backend/src/health/indicators/prisma.indicator.ts), which runs a `SELECT 1` round-trip:
+
+```ts
+async pingCheck(key: string): Promise<HealthIndicatorResult> {
+  const indicator = this.healthIndicatorService.check(key);
+  try {
+    await this.prisma.$queryRaw`SELECT 1`;
+    return indicator.up();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown error';
+    return indicator.down({ message });
+  }
+}
+```
+
+A failed query marks the `database` entry of the composite check as `down`, propagating to the overall HTTP status. See [`docs/cache.md`](cache.md#health-indicator) for the Valkey side.
