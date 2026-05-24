@@ -1,28 +1,22 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { parseValkeyUrl } from '../config/valkey-url.js';
+import { QueueCacheService } from './queue-cache.service.js';
 
 @Global()
 @Module({
   imports: [
     BullModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
-        const url = new URL(configService.getOrThrow<string>('QUEUE_URL'));
-        return {
-          connection: {
-            host: url.hostname,
-            port: Number(url.port) || 6379,
-            username: url.username || undefined,
-            password: url.password
-              ? decodeURIComponent(url.password)
-              : undefined,
-            db: url.pathname ? Number(url.pathname.replace('/', '')) || 0 : 0,
-          },
-        };
-      },
+      useFactory: (configService: ConfigService) => ({
+        connection: parseValkeyUrl(
+          configService.getOrThrow<string>('QUEUE_URL'),
+        ),
+      }),
     }),
   ],
-  exports: [BullModule],
+  providers: [QueueCacheService],
+  exports: [BullModule, QueueCacheService],
 })
 export class QueueModule {}

@@ -14,9 +14,12 @@ import {
   ApiConflictResponse,
   ApiResponse,
   ApiTags,
+  ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { type FastifyRequest } from 'fastify';
+import { ThrottleLimits } from '../config/throttle.config.js';
 import { AuthService } from './auth.service.js';
 import { AuthResponseDto } from './dto/auth.dto.js';
 import { CreateAuthDto } from './dto/create-auth.dto.js';
@@ -28,10 +31,15 @@ import { LocalAuthGuard } from './guards/local-auth.guard.js';
 
 @Controller('auth')
 @ApiTags('Auth')
+@ApiTooManyRequestsResponse({
+  description:
+    'Rate limit exceeded, too many requests in the throttling window.',
+})
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('/register')
+  @Throttle({ default: ThrottleLimits.auth })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBody({
     type: CreateAuthDto,
@@ -44,6 +52,7 @@ export class AuthController {
   }
 
   @Post('/login')
+  @Throttle({ default: ThrottleLimits.auth })
   @UseGuards(LocalAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiBody({

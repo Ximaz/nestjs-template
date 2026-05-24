@@ -5,6 +5,7 @@ import {
   ApiNotFoundResponse,
   ApiResponse,
   ApiTags,
+  ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
@@ -18,6 +19,10 @@ import { UserResponseDto } from './dto/user.dto.js';
 @ApiUnauthorizedResponse({
   description:
     'The client is trying to access the route without being authenticated',
+})
+@ApiTooManyRequestsResponse({
+  description:
+    'Rate limit exceeded, too many requests in the throttling window.',
 })
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
