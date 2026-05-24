@@ -1,5 +1,5 @@
 import * as crypto from 'node:crypto';
-import * as jose from 'jose';
+import jwt from 'jsonwebtoken';
 import { ConfigService } from '@nestjs/config';
 import {
   BadGatewayException,
@@ -7,7 +7,6 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
-  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -20,6 +19,7 @@ import { AuthResponseDto } from '../auth/dto/auth.dto.js';
 import { AuthService } from '../auth/auth.service.js';
 
 const OAUTH_STATE_TTL_SECONDS = 300;
+const JWKS_CACHE_TTL_MS = 10 * 60 * 1000;
 const oauthStateKey = (state: string) => `oauth:state:${state}`;
 
 type OauthProvider = {
@@ -32,19 +32,38 @@ type OauthProvider = {
 };
 
 type Jwk = {
-  alg: string;
-  kid: string;
-  n: string;
-  use: string;
-  e: string;
   kty: string;
+  kid: string;
+  alg?: string;
+  use?: string;
+  n?: string;
+  e?: string;
+  x?: string;
+  y?: string;
+  crv?: string;
+};
+
+type JwksCacheEntry = {
+  keys: Map<string, crypto.KeyObject>;
+  fetchedAt: number;
+};
+
+type IdTokenPayload = {
+  sub: string;
+  email: string;
+  email_verified: boolean;
+  name?: string;
+  picture?: string;
+  given_name?: string;
+  family_name?: string;
 };
 
 @Injectable()
 export class OauthService {
   private readonly logger = new Logger(OauthService.name);
 
-  private OAUTH_PROVIDERS: Record<string, OauthProvider>;
+  private readonly OAUTH_PROVIDERS: Record<string, OauthProvider>;
+  private readonly jwksCache = new Map<string, JwksCacheEntry>();
 
   constructor(
     configService: ConfigService,
@@ -95,49 +114,80 @@ export class OauthService {
     };
   }
 
-  static async decodeIDToken(
-    jwksUrl: OauthProvider['jwksUrl'],
-    idToken: string,
-  ): Promise<UserResponseDto> {
-    const jwksResponse = await fetch(jwksUrl);
-    if (jwksResponse.status !== 200) {
-      throw new NotFoundException(
+  private async fetchJwks(jwksUrl: string): Promise<JwksCacheEntry> {
+    const response = await fetch(jwksUrl);
+    if (response.status !== 200) {
+      throw new BadGatewayException(
         `Unable to fetch the JWKs configuration: ${jwksUrl}`,
       );
     }
-
-    const { keys: jwks } = (await jwksResponse.json()) as { keys: Jwk[] };
-    const headers = jose.decodeProtectedHeader(idToken);
-    const keyEntry = jwks.find((key) => key.kid === headers.kid);
-    if (keyEntry === undefined) {
-      throw new BadGatewayException(
-        'Unable to find a matching JWK to verify OpenID token.',
+    const { keys } = (await response.json()) as { keys: Jwk[] };
+    const map = new Map<string, crypto.KeyObject>();
+    for (const jwk of keys) {
+      map.set(
+        jwk.kid,
+        crypto.createPublicKey({
+          key: jwk as crypto.JsonWebKey,
+          format: 'jwk',
+        }),
       );
     }
+    return { keys: map, fetchedAt: Date.now() };
+  }
 
-    const publicKey = await crypto.subtle.importKey(
-      'jwk',
-      keyEntry,
-      {
-        name: 'RSASSA-PKCS1-v1_5',
-        hash: 'SHA-256',
-      },
-      false,
-      ['verify'],
-    );
+  private async getSigningKey(
+    jwksUrl: string,
+    kid: string,
+  ): Promise<crypto.KeyObject> {
+    let entry = this.jwksCache.get(jwksUrl);
+    const isStale =
+      entry === undefined || Date.now() - entry.fetchedAt > JWKS_CACHE_TTL_MS;
+    if (isStale || !entry?.keys.has(kid)) {
+      entry = await this.fetchJwks(jwksUrl);
+      this.jwksCache.set(jwksUrl, entry);
+    }
+    const key = entry.keys.get(kid);
+    if (key === undefined) {
+      throw new BadGatewayException(
+        `Unable to find a matching JWK (kid=${kid}) to verify the OpenID token.`,
+      );
+    }
+    return key;
+  }
 
-    const decodedToken = await jose.jwtVerify(idToken, publicKey);
+  private async decodeIDToken(
+    jwksUrl: string,
+    idToken: string,
+  ): Promise<UserResponseDto> {
+    const headerSegment = idToken.split('.')[0];
+    if (!headerSegment) {
+      throw new BadGatewayException('Malformed OpenID token');
+    }
+    const header = JSON.parse(
+      Buffer.from(headerSegment, 'base64url').toString('utf8'),
+    ) as { kid?: string; alg?: string };
 
-    const payload = decodedToken.payload as {
-      sub: string;
-      email: string;
-      email_verified: boolean;
-      at_hash: string;
-      name: string;
-      picture: string;
-      given_name: string;
-      family_name: string;
-    };
+    if (header.alg !== 'RS256') {
+      throw new BadGatewayException(
+        `Unsupported JWT algorithm: ${header.alg ?? 'none'}`,
+      );
+    }
+    if (header.kid === undefined) {
+      throw new BadGatewayException('OpenID token header missing kid');
+    }
+
+    const key = await this.getSigningKey(jwksUrl, header.kid);
+
+    const payload = await new Promise<IdTokenPayload>((resolve, reject) => {
+      jwt.verify(idToken, key, { algorithms: ['RS256'] }, (err, decoded) => {
+        if (err) return reject(err);
+        resolve(decoded as IdTokenPayload);
+      });
+    }).catch((err: Error) => {
+      throw new BadGatewayException(
+        `Unable to verify the OpenID token: ${err.message}`,
+      );
+    });
 
     if (!payload.email_verified) {
       throw new ForbiddenException(
@@ -148,9 +198,9 @@ export class OauthService {
     return {
       id: payload.sub,
       email: payload.email,
-      firstName: payload.given_name,
-      lastName: payload.family_name,
-      picture: payload.picture,
+      firstName: payload.given_name ?? null,
+      lastName: payload.family_name ?? null,
+      picture: payload.picture ?? null,
     };
   }
 
@@ -207,7 +257,7 @@ export class OauthService {
 
     await this.revoke(provider, data.access_token);
 
-    const user = await OauthService.decodeIDToken(jwksUrl, data.id_token);
+    const user = await this.decodeIDToken(jwksUrl, data.id_token);
 
     const currentOAuth = await this.prismaService.oAuthCredential.findUnique({
       select: {

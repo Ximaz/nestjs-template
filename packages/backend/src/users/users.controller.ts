@@ -7,13 +7,13 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { AuthGuard } from '../auth/guards/jwt.guard.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { UsersService } from './users.service.js';
 import { UserResponseDto } from './dto/user.dto.js';
 
 @Controller('users')
 @ApiTags('Users')
-@UseGuards(AuthGuard)
+@UseGuards(JwtAuthGuard)
 @ApiBearerAuth('jwt')
 @ApiUnauthorizedResponse({
   description:

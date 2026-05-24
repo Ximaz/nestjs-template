@@ -4,13 +4,13 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
-  Logger,
 } from '@nestjs/common';
+import { Logger } from 'nestjs-pino';
 import { FastifyReply, FastifyRequest } from 'fastify';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(GlobalExceptionFilter.name);
+  constructor(private readonly logger: Logger) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -26,7 +26,10 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
 
-      this.logger.error(exception.message, exception.stack);
+      this.logger.error(
+        { err: exception, statusCode: status, path: request.url },
+        exception.message,
+      );
 
       response.status(status).send({
         statusCode: status,
@@ -37,8 +40,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
 
     this.logger.error(
-      `Unhandled exception on ${request.method} ${request.url}`,
-      exception instanceof Error ? exception.stack : JSON.stringify(exception),
+      { err: exception, path: request.url, method: request.method },
+      'Unhandled exception',
     );
 
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).send({
